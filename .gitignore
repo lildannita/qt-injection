@@ -1,0 +1,6 @@
+builds/
+.qmake.stash
+*.user
+*.autosave
+CMakeLists.txt.user
+.qtcreator
