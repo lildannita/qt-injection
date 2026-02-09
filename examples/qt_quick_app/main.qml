@@ -5,135 +5,185 @@ import QtQuick.Layouts 1.15
 
 Window {
     id: root
-
-    property int spawnCounter: 0
-
     objectName: "rootWindow"
     visible: true
-    width: 480
-    height: 420
+    width: 520
+    height: 480
     title: "Qt Quick - Injection Test Stand"
 
     ColumnLayout {
         objectName: "mainColumn"
-        anchors {
-            fill: parent
-            margins: 16
-        }
-
+        anchors.fill: parent
+        anchors.margins: 16
         spacing: 12
 
         Label {
-            Layout.fillWidth: true
-            text: "Agent diagnostic output goes to stderr (console)."
+            objectName: "infoLabel"
+            text: "Agent output goes to stderr. Interact with elements below."
             wrapMode: Text.Wrap
+            Layout.fillWidth: true
         }
 
-        TextField {
-            id: inputField
-
-            objectName: "inputField"
+        // ── Tab bar ──────────────────────────────────────────────────────
+        TabBar {
+            id: tabBar
+            objectName: "tabBar"
             Layout.fillWidth: true
-            placeholderText: "Type something..."
-        }
 
-        Button {
-            objectName: "btnGreet"
-            Layout.fillWidth: true
-            text: "Greet"
-            onClicked: {
-                infoLabel2.text = "Hello from " + inputField.text;
+            TabButton {
+                objectName: "tabInput"
+                text: "Input"
+            }
+            TabButton {
+                objectName: "tabControls"
+                text: "Controls"
+            }
+            TabButton {
+                objectName: "tabButtons"
+                text: "Buttons"
             }
         }
 
-        Label {
-            id: infoLabel2
-
-            Layout.fillWidth: true
-        }
-
-        // Dynamic creation area
-        Rectangle {
-            objectName: "dynamicArea"
+        StackLayout {
+            objectName: "stackLayout"
+            currentIndex: tabBar.currentIndex
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: "#F0F0F0"
-            border.color: "#ccc"
-            radius: 4
 
+            // ── Page 1: Input ────────────────────────────────────────────
             ColumnLayout {
-                anchors {
-                    fill: parent
-                    margins: 8
+                objectName: "inputPage"
+                spacing: 8
+
+                TextField {
+                    id: nameTextField
+
+                    objectName: "nameField"
+                    placeholderText: "Enter your name..."
+                    Layout.fillWidth: true
                 }
 
-                spacing: 6
+                TextField {
+                    id: messageTextField
+
+                    objectName: "messageField"
+                    placeholderText: "Enter a message..."
+                    Layout.fillWidth: true
+                }
 
                 Label {
-                    objectName: "dynamicAreaLabel"
-                    text: "Dynamic items appear below (auto every 3 s, removed after 5 s):"
-                    wrapMode: Text.Wrap
-                }
-
-                // Container for dynamically spawned items
-                Column {
-                    id: dynamicColumn
-
-                    objectName: "dynamicColumn"
+                    id: greetLabel
+                    objectName: "greetLabel"
+                    text: ""
                     Layout.fillWidth: true
-                    spacing: 4
+                }
+
+                Button {
+                    objectName: "btnGreet"
+                    text: "Greet"
+                    Layout.fillWidth: true
+                    onClicked: {
+                        greetLabel.text = nameTextField.text.trim() + " says: " + messageTextField.text.trim();
+                    }
+                }
+            }
+
+            // ── Page 2: Controls ─────────────────────────────────────────
+            ColumnLayout {
+                objectName: "controlsPage"
+                spacing: 8
+
+                CheckBox {
+                    objectName: "featureCheck"
+                    text: "Enable feature"
+                }
+
+                // Intentionally unnamed checkbox - tests fallback path
+                CheckBox {
+                    text: "Another option"
+                }
+
+                Label {
+                    objectName: "radioLabel"
+                    text: "Select option:"
+                }
+
+                RadioButton {
+                    objectName: "radioA"
+                    text: "Option A"
+                    checked: true
+                }
+                RadioButton {
+                    objectName: "radioB"
+                    text: "Option B"
+                }
+                // Intentionally unnamed
+                RadioButton {
+                    text: "Option C"
+                }
+
+                ComboBox {
+                    objectName: "comboBox"
+                    model: ["First", "Second", "Third"]
+                    Layout.fillWidth: true
+                }
+            }
+
+            // ── Page 3: Buttons ──────────────────────────────────────────
+            ColumnLayout {
+                id: buttonsPageLayout
+
+                objectName: "buttonsPage"
+                spacing: 8
+
+                Label {
+                    id: clickCount
+                    objectName: "clickCount"
+                    text: "Clicks: 0"
+                }
+
+                property int counter: 0
+
+                RowLayout {
+                    objectName: "buttonRow"
+                    spacing: 8
+
+                    Button {
+                        objectName: "btn1"
+                        text: "Button 1"
+                        onClicked: {
+                            buttonsPageLayout.counter++;
+                            clickCount.text = "Clicks: " + buttonsPageLayout.counter;
+                        }
+                    }
+                    // Intentionally unnamed
+                    Button {
+                        text: "Button 2"
+                        onClicked: {
+                            buttonsPageLayout.counter++;
+                            clickCount.text = "Clicks: " + buttonsPageLayout.counter;
+                        }
+                    }
+                    Button {
+                        objectName: "btn3"
+                        text: "Button 3"
+                        onClicked: {
+                            buttonsPageLayout.counter++;
+                            clickCount.text = "Clicks: " + buttonsPageLayout.counter;
+                        }
+                    }
+                }
+
+                Button {
+                    objectName: "btnReset"
+                    text: "Reset"
+                    Layout.fillWidth: true
+                    onClicked: {
+                        buttonsPageLayout.counter = 0;
+                        clickCount.text = "Clicks: 0";
+                    }
                 }
             }
         }
-
-        Button {
-            objectName: "btnSpawn"
-            text: "Spawn item manually"
-            Layout.fillWidth: true
-            onClicked: root.spawnItem()
-        }
-    }
-
-    // ── Dynamic item creation ────────────────────────────────────────────
-
-
-
-    Component {
-        id: dynamicRect
-
-        Rectangle {
-            width: dynamicColumn.width
-            height: 30
-            radius: 3
-            color: Qt.rgba(Math.random(), Math.random(), 0.8, 0.4)
-
-            Label {
-                anchors.centerIn: parent
-                text: parent.objectName
-            }
-        }
-    }
-
-    function spawnItem() {
-        root.spawnCounter++;
-        var obj = dynamicRect.createObject(dynamicColumn, {
-            "objectName": "dynItem_" + spawnCounter
-        });
-        // Auto-destroy after 5 seconds
-        obj.Component.destruction.connect(function() {});
-        var timer = Qt.createQmlObject(
-            'import QtQuick 2.15; Timer { interval: 5000; running: true; repeat: false }',
-            obj, "destroyTimer");
-        timer.objectName = "destroyTimer_" + root.spawnCounter;
-        timer.triggered.connect(function() { obj.destroy() });
-    }
-
-    // Auto-spawn every 3 seconds
-    Timer {
-        objectName: "autoSpawnTimer"
-        interval: 3000
-        running: true
-        repeat: true
-        onTriggered: root.spawnItem()
     }
 }
