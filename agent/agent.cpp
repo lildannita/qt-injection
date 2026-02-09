@@ -1,206 +1,185 @@
 #include <QObject>
 #include <QCoreApplication>
-#include <QWidget>
-#include <QQuickItem>
-#include <QTimer>
-#include <QHash>
-#include <QMutex>
 #include <private/qhooks_p.h>
-#include <cassert>
 #include <iostream>
 
-#include "object_path.hpp"
+#include "agent_initializer.hpp"
 
-// ── original hook pointers (for delegation) ──────────────────────────────────
+// [EN] This is the entry point of the agent shared library.  It hooks into
+//      Qt's qtHookData mechanism and uses the Startup hook to create an
+//      AgentInitializer, which defers EventTracker installation to the next
+//      event loop iteration via Qt::QueuedConnection.
+//
+// Architecture:
+//
+//   Q_COREAPP_STARTUP_FUNCTION
+//     └─ installHooks()
+//          └─ overwrites qtHookData slots
+//
+//   QCoreApplication constructor calls Startup hook:
+//     └─ hookStartup()
+//          └─ creates AgentInitializer (→ moveToThread → QueuedConnection)
+//
+//   Event loop starts (app.exec()):
+//     └─ AgentInitializer::initAgent() fires
+//          └─ installEventTracker()
+//               └─ EventTracker::eventFilter() now active
+//
+//   User clicks a button:
+//     └─ QCoreApplication::notify() → EventTracker::eventFilter()
+//          └─ logs: [*] MouseButtonPress  QPushButton  name=btnGreet  path=...
+//
+// [RU] Точка входа разделяемой библиотеки агента.  Подключается к механизму
+//      qtHookData Qt и использует хук Startup для создания AgentInitializer,
+//      который откладывает установку EventTracker на следующую итерацию
+//      event loop через Qt::QueuedConnection.
+//
+// Архитектура:
+//
+//   Q_COREAPP_STARTUP_FUNCTION
+//     └─ installHooks()
+//          └─ перезаписывает слоты qtHookData
+//
+//   Конструктор QCoreApplication вызывает хук Startup:
+//     └─ hookStartup()
+//          └─ создаёт AgentInitializer (→ moveToThread → QueuedConnection)
+//
+//   Event loop запускается (app.exec()):
+//     └─ AgentInitializer::initAgent() срабатывает
+//          └─ installEventTracker()
+//               └─ EventTracker::eventFilter() теперь активен
+//
+//   Пользователь кликает на кнопку:
+//     └─ QCoreApplication::notify() → EventTracker::eventFilter()
+//          └─ логирует: [*] MouseButtonPress  QPushButton  name=btnGreet  path=...
+
+// ── original hook pointers ───────────────────────────────────────────────────
 // [EN] Saved before we overwrite the slots.  May be nullptr (no previous hook)
 //      or point to another tool's callback (e.g. GammaRay).
 // [RU] Сохраняются до перезаписи слотов.  Могут быть nullptr (хука не было)
 //      или указывать на callback другого инструмента (напр. GammaRay).
-static void (*g_nextStartup)() = nullptr;
-static void (*g_nextAddObject)(QObject *) = nullptr;
-static void (*g_nextRemoveObject)(QObject *) = nullptr;
+static void (*g_nextStartup)()              = nullptr;
+static void (*g_nextAddObject)(QObject*)    = nullptr;
+static void (*g_nextRemoveObject)(QObject*) = nullptr;
 
-// ── cached object info / кэшированная информация об объектах ─────────────────
-// [EN] We cache class name and path at the moment the object is fully
-//      constructed (deferred ADD).  This cache is then used in the DEL
-//      handler, where vtable has already unwound to QObject and we can
-//      no longer obtain the real class name.
+// ── hook callbacks ───────────────────────────────────────────────────────────
+
+// [EN] Startup hook - fired during QCoreApplication construction.
+//      Creates the AgentInitializer which will install the EventTracker
+//      on the next event loop iteration.
 //
-//      We also record whether the object is a GUI component (QWidget or
-//      QQuickItem).  Non-GUI objects are silently ignored.
+//      Why create AgentInitializer here and not install EventTracker directly?
+//      Because QCoreApplication is still being constructed - its event
+//      dispatching mechanism is not yet fully operational.  The initializer
+//      uses QueuedConnection to defer to a safe point.
 //
-// [RU] Кэшируем имя класса и путь в момент полного конструирования объекта
-//      (отложенный ADD).  Этот кэш используется в обработчике DEL, где
-//      vtable уже откатился до QObject и получить реальное имя класса
-//      невозможно.
+// [RU] Хук Startup - срабатывает при конструировании QCoreApplication.
+//      Создаёт AgentInitializer, который установит EventTracker на
+//      следующей итерации event loop.
 //
-//      Также запоминаем, является ли объект GUI-компонентом (QWidget или
-//      QQuickItem).  Не-GUI объекты молча игнорируются.
-
-struct CachedObjectInfo {
-    QString className;
-    QString objectName;
-    QString path;
-};
-
-static QMutex g_mutex;
-static QSet<const QObject *> g_pendingObjects;
-static QHash<const QObject *, CachedObjectInfo> g_objectCache;
-
-// [EN] Returns true if the object is a GUI component: QWidget (Widgets) or
-//      QQuickItem (Quick/QML).  Must be called only when the object is fully
-//      constructed (i.e. from the deferred handler, not from the hook).
-//
-// [RU] Возвращает true, если объект - GUI-компонент: QWidget (Widgets) или
-//      QQuickItem (Quick/QML).  Вызывать только когда объект полностью
-//      сконструирован (т.е. из отложенного обработчика, не из хука).
-static bool isGuiObject(QObject *obj) noexcept
-{
-    return qobject_cast<QWidget *>(obj) != nullptr
-           || qobject_cast<QQuickItem *>(obj) != nullptr;
-}
-
-enum class HookEvent { Add, Remove };
-
-static void logEvent(HookEvent event, const QString &cls,
-                     const QString &name, const QString &path) noexcept
-{
-    const auto *tag = (event == HookEvent::Add) ? "[+] ADD  " : "[-] DEL  ";
-    const auto displayName = name.isEmpty() ? QStringLiteral("-") : name;
-
-    std::cerr << tag
-              << cls.toStdString()
-              << " name=" << displayName.toStdString()
-              << " path=" << path.toStdString()
-              << std::endl;
-}
-
+//      Почему создаём AgentInitializer, а не устанавливаем EventTracker
+//      напрямую?  Потому что QCoreApplication ещё конструируется - его
+//      механизм диспетчеризации событий ещё не полностью работоспособен.
+//      Инициализатор использует QueuedConnection для отложенного вызова
+//      в безопасный момент.
 static void hookStartup()
 {
-    std::cerr << "[agent] startup hook fired" << std::endl;
+    std::cerr << "[agent] startup hook fired." << std::endl;
+
+    // [EN] AgentInitializer moves itself to the main thread and schedules
+    //      initAgent() via QueuedConnection.  It will be destroyed by
+    //      deleteLater() after initAgent() completes.
+    //      The `new` without storing the pointer is intentional - the object
+    //      manages its own lifetime.
+    //
+    // [RU] AgentInitializer переносит себя в главный поток и планирует
+    //      initAgent() через QueuedConnection.  Он будет уничтожен через
+    //      deleteLater() после завершения initAgent().
+    //      `new` без сохранения указателя - намеренно: объект управляет
+    //      своим временем жизни.
+
+    new agent::AgentInitializer();
+
     if (g_nextStartup)
         g_nextStartup();
 }
 
-// [EN] Deferred handler - called from event loop when the object is fully
-//      constructed.  At this point vtable is correct, metaObject() returns
-//      the real class, objectName() is set, parent/children are complete.
-//      We check if the object is a GUI component; if not - skip silently.
-//      If yes - cache the info and print the ADD message.
+// [EN] AddQObject hook - called from QObject's base constructor.
 //
-// [RU] Отложенный обработчик - вызывается из event loop, когда объект
-//      полностью сконструирован.  В этот момент vtable корректен,
-//      metaObject() возвращает реальный класс, objectName() задан,
-//      parent/children сформированы.
-//      Проверяем, является ли объект GUI-компонентом; если нет - пропускаем.
-//      Если да - кэшируем информацию и выводим ADD.
-static void processDeferredAdd(QObject *obj)
-{
-    {
-        QMutexLocker lock(&g_mutex);
-        if (!g_pendingObjects.remove(obj))
-            return; // already removed or processed
-    }
-
-    if (!isGuiObject(obj))
-        return;
-
-    const auto cls  = agent::getCorrectClassName(obj);
-    const auto name = obj->objectName();
-    const auto path = agent::objectPath(obj);
-
-    {
-        QMutexLocker lock(&g_mutex);
-        g_objectCache.insert(obj, { cls, name, path });
-    }
-
-    logEvent(HookEvent::Add, cls, name, path);
-}
-
-// [EN] AddQObject hook - called from QObject base constructor.
-//      We only record the pointer and schedule deferred processing.
-//      No class info is read here.
+//      Left empty (delegation only) in this test stand because:
+//
+//      1. vtable points to QObject, not the derived class - className(),
+//         objectName(), and parent hierarchy are all unreliable here.
+//
+//      2. Deferred identification (timer queue, background thread) adds
+//         complexity unjustified for a minimal stand: thread safety,
+//         cache invalidation, handling premature destruction.
+//
+//      3. The EventTracker identifies objects at interaction time, when
+//         they are fully constructed.  This is sufficient for our goal:
+//         verify that injection works and paths are computed correctly.
+//
+//      A production tool would queue the pointer here and process it
+//      later (after derived constructors complete) to maintain a live
+//      object tree.
 //
 // [RU] Хук AddQObject - вызывается из конструктора базового QObject.
-//      Только запоминаем указатель и планируем отложенную обработку.
-//      Информацию о классе здесь не читаем.
+//
+//      Оставлен пустым (только делегирование) в этом стенде, потому что:
+//
+//      1. vtable указывает на QObject, не на производный класс - className(),
+//         objectName() и иерархия parent ненадёжны в этой точке.
+//
+//      2. Отложенная идентификация (очередь с таймером, фоновый поток)
+//         добавляет сложность, не оправданную для минимального стенда:
+//         потокобезопасность, инвалидация кэша, обработка преждевременного
+//         удаления.
+//
+//      3. EventTracker идентифицирует объекты в момент взаимодействия,
+//         когда они полностью сконструированы.  Этого достаточно для нашей
+//         цели: проверить, что инъекция работает и пути вычисляются корректно.
+//
+//      В продакшен-инструменте здесь бы ставился указатель в очередь
+//      для обработки позже (после завершения конструкторов производных
+//      классов) для поддержания живого дерева объектов.
 static void hookAddObject(QObject *obj)
 {
-    if (obj) {
-        if (QCoreApplication::instance()) {
-            {
-                QMutexLocker lock(&g_mutex);
-                g_pendingObjects.insert(obj);
-            }
-            QTimer::singleShot(0, [obj]() {
-                processDeferredAdd(obj);
-            });
-        }
-        // [EN] No event loop yet - skip. Objects created before QCoreApplication
-        //      (like QCoreApplication itself) are not GUI components anyway.
-        // [RU] Event loop ещё нет - пропускаем. Объекты, создаваемые до
-        //      QCoreApplication (например, сам QCoreApplication), не являются
-        //      GUI-компонентами в любом случае.
-    }
     if (g_nextAddObject)
         g_nextAddObject(obj);
 }
 
-// [EN] RemoveQObject hook - called from QObject destructor.
-//      vtable has unwound to QObject, so we CANNOT read the real class.
-//      Instead we look up the cached info from the deferred ADD.
-//      If the object was never cached (not a GUI component, or was
-//      destroyed before the deferred ADD fired), we skip silently.
+// [EN] RemoveQObject hook - called from QObject's destructor.
+//
+//      Empty for the same reasons as AddQObject: no object tree to
+//      maintain, and vtable has already unwound to QObject - real class
+//      name is unavailable without a cache from creation time.
+//
+//      The EventTracker needs no destruction notification - it simply
+//      won't receive events for a destroyed object.
+//
+//      A production tool would remove the object from its known set,
+//      clean up pending queues, and notify dependent components.
 //
 // [RU] Хук RemoveQObject - вызывается из деструктора QObject.
-//      vtable откатился до QObject, поэтому реальный класс прочитать
-//      НЕЛЬЗЯ.  Вместо этого берём кэшированную информацию из
-//      отложенного ADD.  Если объект не был закэширован (не GUI-компонент
-//      или был удалён до срабатывания отложенного ADD) - пропускаем.
+//
+//      Пуст по тем же причинам, что и AddQObject: нет дерева объектов
+//      для поддержания, и vtable уже откатился до QObject - реальное
+//      имя класса недоступно без кэша, заполненного при создании.
+//
+//      EventTracker не нуждается в уведомлении об удалении - он просто
+//      перестанет получать события для удалённого объекта.
+//
+//      В продакшен-инструменте здесь удалялся бы объект из множества
+//      известных, чистились очереди ожидания и уведомлялись зависимые
+//      компоненты.
 static void hookRemoveObject(QObject *obj)
 {
-    if (obj) {
-        QMutexLocker lock(&g_mutex);
-
-        // [EN] If still pending - never got to deferred ADD. Remove silently.
-        // [RU] Если ещё в pending - отложенный ADD не сработал. Убираем молча.
-        g_pendingObjects.remove(obj);
-
-        auto it = g_objectCache.find(obj);
-        if (it != g_objectCache.end()) {
-            const auto info = it.value(); // copy before erase
-            g_objectCache.erase(it);
-            lock.unlock();
-            logEvent(HookEvent::Remove, info.className, info.objectName, info.path);
-        }
-    }
     if (g_nextRemoveObject)
         g_nextRemoveObject(obj);
 }
 
-// [EN] Reads the current values from qtHookData (saving them for delegation),
-//      then overwrites the slots with our callbacks.
-//
-//      qtHookData is a plain C array of quintptr (unsigned integer the size
-//      of a pointer).  The first two elements are metadata:
-//        [HookDataVersion] - must be >= 1 (we understand this version)
-//        [HookDataSize]    - must be >= 6 (array has at least 6 elements)
-//      The remaining elements are function pointers cast to quintptr:
-//        [Startup]       - StartupCallback:       void (*)()
-//        [AddQObject]    - AddQObjectCallback:    void (*)(QObject*)
-//        [RemoveQObject] - RemoveQObjectCallback: void (*)(QObject*)
-//
-// [RU] Считывает текущие значения из qtHookData (сохраняя их для делегирования),
-//      затем перезаписывает слоты нашими callback'ами.
-//
-//      qtHookData - обычный C-массив quintptr (беззнаковое целое размером
-//      с указатель).  Первые два элемента - метаданные:
-//        [HookDataVersion] - должен быть >= 1 (мы понимаем эту версию)
-//        [HookDataSize]    - должен быть >= 6 (массив содержит минимум 6 элементов)
-//      Остальные элементы - указатели на функции, приведённые к quintptr:
-//        [Startup]       - StartupCallback:       void (*)()
-//        [AddQObject]    - AddQObjectCallback:    void (*)(QObject*)
-//        [RemoveQObject] - RemoveQObjectCallback: void (*)(QObject*)
+// ── hook installation ────────────────────────────────────────────────────────
+
 static void installHooksInternal()
 {
     if (qtHookData[QHooks::HookDataVersion] < 1 ||
@@ -210,6 +189,8 @@ static void installHooksInternal()
         return;
     }
 
+    // [EN] Save originals for delegation chain.
+    // [RU] Сохраняем оригиналы для цепочки делегирования.
     g_nextStartup = reinterpret_cast<QHooks::StartupCallback>(
         qtHookData[QHooks::Startup]);
     g_nextAddObject = reinterpret_cast<QHooks::AddQObjectCallback>(
@@ -217,6 +198,8 @@ static void installHooksInternal()
     g_nextRemoveObject = reinterpret_cast<QHooks::RemoveQObjectCallback>(
         qtHookData[QHooks::RemoveQObject]);
 
+    // [EN] Install our hooks.
+    // [RU] Устанавливаем наши хуки.
     qtHookData[QHooks::Startup]       = reinterpret_cast<quintptr>(&hookStartup);
     qtHookData[QHooks::AddQObject]    = reinterpret_cast<quintptr>(&hookAddObject);
     qtHookData[QHooks::RemoveQObject] = reinterpret_cast<quintptr>(&hookRemoveObject);
@@ -224,8 +207,8 @@ static void installHooksInternal()
     std::cerr << "[agent] hooks installed successfully." << std::endl;
 }
 
-// [EN] Guard against double installation - if we're already hooked, skip.
-// [RU] Защита от повторной установки - если уже установлены, пропускаем.
+// [EN] Guard against double installation.
+// [RU] Защита от повторной установки.
 static bool alreadyInstalled() noexcept
 {
     return qtHookData[QHooks::AddQObject] == reinterpret_cast<quintptr>(&hookAddObject);
@@ -238,15 +221,10 @@ static void installHooks()
 }
 
 // [EN] Q_COREAPP_STARTUP_FUNCTION registers installHooks to be called during
-//      the construction of the first QCoreApplication (or QApplication /
-//      QGuiApplication, which inherit from it).  This macro expands to a
-//      static initializer that appends our function to an internal list;
-//      QCoreApplication's constructor iterates this list and calls each entry.
+//      QCoreApplication construction.  The macro expands to a static
+//      initializer that appends our function to Qt's internal startup list.
 //
-// [RU] Q_COREAPP_STARTUP_FUNCTION регистрирует installHooks для вызова во
-//      время конструирования первого QCoreApplication (или QApplication /
-//      QGuiApplication, наследующих от него).  Макрос раскрывается в
-//      статический инициализатор, добавляющий нашу функцию во внутренний
-//      список; конструктор QCoreApplication проходит по этому списку и
-//      вызывает каждую запись.
+// [RU] Q_COREAPP_STARTUP_FUNCTION регистрирует installHooks для вызова при
+//      конструировании QCoreApplication.  Макрос раскрывается в статический
+//      инициализатор, добавляющий нашу функцию во внутренний список Qt.
 Q_COREAPP_STARTUP_FUNCTION(installHooks)

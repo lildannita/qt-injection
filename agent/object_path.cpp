@@ -3,7 +3,6 @@
 #include <QQuickItem>
 #include <QRegularExpression>
 #include <QStringList>
-
 #include <cassert>
 #include <utility>
 

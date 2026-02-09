@@ -302,17 +302,17 @@ static bool inject(const std::wstring &targetExe,
                << std::endl;
 
     // [EN] Wait for the target process to finish.  This keeps the injector
-    //      (and its parent — the Python script) alive, so the console stays
+    //      (and its parent - the Python script) alive, so the console stays
     //      open and stderr output from the agent is visible.
     //      Without this, the injector exits immediately, the Python script
-    //      finishes, and the console may close or show the prompt — hiding
+    //      finishes, and the console may close or show the prompt - hiding
     //      the agent's output.
     //
     // [RU] Ждём завершения целевого процесса.  Это удерживает инжектор
-    //      (и его родителя — Python-скрипт) живыми, поэтому консоль
+    //      (и его родителя - Python-скрипт) живыми, поэтому консоль
     //      остаётся открытой и вывод агента в stderr виден.
     //      Без этого инжектор завершается сразу, Python-скрипт заканчивается,
-    //      и консоль может закрыться или показать промпт — скрывая
+    //      и консоль может закрыться или показать промпт - скрывая
     //      вывод агента.
     WaitForSingleObject(pi.hProcess, INFINITE);
 

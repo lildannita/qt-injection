@@ -1,6 +1,19 @@
-add_library(agent SHARED agent.cpp object_path.hpp object_path.cpp)
+add_library(agent SHARED
+    agent.cpp
+    agent_initializer.hpp
+    agent_initializer.cpp
+    object_tracker.hpp
+    object_tracker.cpp
+    object_path.hpp
+    object_path.cpp
+)
 
-target_link_libraries(agent PRIVATE Qt5::Core Qt5::CorePrivate Qt5::Quick Qt5::Widgets)
+target_link_libraries(agent PRIVATE
+    Qt5::Core
+    Qt5::CorePrivate
+    Qt5::Widgets
+    Qt5::Quick
+)
 
 # On Windows the DLL goes to bin/ so the injector can find it easily;
 # on POSIX it stays in lib/.
