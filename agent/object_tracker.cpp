@@ -129,9 +129,9 @@ bool EventTracker::eventFilter(QObject *watched, QEvent *event)
     const auto displayName = name.isEmpty() ? QStringLiteral("-") : name;
 
     std::cerr << "[*] " << eventName
-              << "  " << cls.toStdString()
-              << "  name=" << displayName.toStdString()
-              << "  path=" << path.toStdString()
+              << "  " << cls.toUtf8().constData()
+              << "  name=" << displayName.toUtf8().constData()
+              << "  path=" << path.toUtf8().constData()
               << std::endl;
 
     // [EN] Never consume the event.  We are a passive observer - the event
