@@ -1,6 +1,8 @@
-builds/
+/build*/
 .qmake.stash
 *.user
 *.autosave
 CMakeLists.txt.user
 .qtcreator
+*tar.gz
+.idea

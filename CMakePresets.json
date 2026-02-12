@@ -1,0 +1,50 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "android-develop-arm64",
+            "displayName": "Android develop config for arm64 devices",
+            "description": "",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/builds/android_arm64",
+            "cacheVariables": {
+                "ANDROID_ABI": "arm64-v8a",
+                "ANDROID_NDK_VERSION": "25.2.9519653",
+                "ANDROID_NATIVE_API_LEVEL": "24",
+                "ANDROID_STL": "c++_shared",
+                "APK_BUILD_TYPE": "debug",
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_SDK}/ndk/25.2.9519653/build/cmake/android.toolchain.cmake",
+                "CMAKE_FIND_ROOT_PATH": "$env{QT_ANDROID_PATH}",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "On",
+                "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+            }
+        },
+        {
+            "name": "android-develop-x86_64",
+            "displayName": "Android develop config for x86_64 emulators",
+            "description": "",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/builds/android_x86_64",
+            "cacheVariables": {
+                "ANDROID_ABI": "x86_64",
+                "ANDROID_NDK_VERSION": "25.2.9519653",
+                "ANDROID_NATIVE_API_LEVEL": "24",
+                "ANDROID_STL": "c++_shared",
+                "APK_BUILD_TYPE": "debug",
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_SDK}/ndk/25.2.9519653/build/cmake/android.toolchain.cmake",
+                "CMAKE_FIND_ROOT_PATH": "$env{QT_ANDROID_PATH}",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "On",
+                "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+            }
+        }
+    ],
+    "buildPresets": [],
+    "testPresets": []
+}

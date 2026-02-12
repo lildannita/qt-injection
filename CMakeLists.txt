@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(qt-injection LANGUAGES CXX)
 
@@ -26,4 +26,7 @@ find_package(Qt5 5.15 REQUIRED COMPONENTS Core Widgets Quick)
 
 add_subdirectory(agent)
 add_subdirectory(examples)
-add_subdirectory(windows_injector)
+
+if(WIN32)
+    add_subdirectory(platforms/windows_injector)
+endif()

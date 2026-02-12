@@ -1,0 +1,3 @@
+[submodule "3rdparty/QtAndroidCMake"]
+	path = 3rdparty/QtAndroidCMake
+	url = git@github.com:lildannita/QtAndroidCMake.git
