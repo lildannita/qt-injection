@@ -4,8 +4,11 @@
 #include <QWidget>
 #include <QQuickItem>
 #include <iostream>
+#include <QRemoteObjectNode>
+#include <QRemoteObjectReplica>
 
 #include "object_path.hpp"
+#include "rep_RemoteObjectExample_replica.h"
 
 namespace agent {
 
@@ -33,6 +36,10 @@ static const char *interactionEventName(QEvent::Type type) noexcept
     case QEvent::MouseButtonPress:    return "MouseButtonPress";
     case QEvent::MouseButtonRelease:  return "MouseButtonRelease";
     case QEvent::MouseButtonDblClick: return "MouseButtonDblClick";
+
+    case QEvent::TouchBegin:          return "TouchBegin";
+    case QEvent::TouchEnd:            return "TouchEnd";
+
 
     // ── Keyboard / клавиатура ────────────────────────────────────────────
     case QEvent::KeyPress:            return "KeyPress";
@@ -76,6 +83,24 @@ static bool isGuiObject(const QObject *obj) noexcept
 EventTracker::EventTracker(QObject *parent)
     : QObject(parent)
 {
+    m_roNode = new QRemoteObjectNode(this);
+    m_roNode->connectToNode(QUrl(QStringLiteral("local:demo")));
+
+    m_roReplica.reset(m_roNode->acquire<ROExampleReplica>());
+    if (m_roReplica) {
+        QObject::connect(m_roReplica.get(), &QRemoteObjectReplica::initialized, this, [this]() {
+            qInfo() << "[agent] ROExampleReplica initialized";
+            // Call a remote slot on the host as a handshake.
+            m_roReplica->pong(QStringLiteral("agent connected"));
+        });
+
+        QObject::connect(m_roReplica.get(), &ROExampleReplica::messageChanged, this, [this]() {
+            qInfo() << "[agent] RO message:" << m_roReplica->message();
+        });
+        QObject::connect(m_roReplica.get(), &ROExampleReplica::ping, this, [](int seq) {
+            qInfo() << "[agent] RO ping:" << seq;
+        });
+    }
 }
 
 bool EventTracker::eventFilter(QObject *watched, QEvent *event)
@@ -128,11 +153,15 @@ bool EventTracker::eventFilter(QObject *watched, QEvent *event)
 
     const auto displayName = name.isEmpty() ? QStringLiteral("-") : name;
 
-    std::cerr << "[*] " << eventName
+    // std::cerr << "[*] " << eventName
+    //           << "  " << cls.toUtf8().constData()
+    //           << "  name=" << displayName.toUtf8().constData()
+    //           << "  path=" << path.toUtf8().constData()
+    //           << std::endl;
+    qInfo() << "[*] " << eventName
               << "  " << cls.toUtf8().constData()
               << "  name=" << displayName.toUtf8().constData()
-              << "  path=" << path.toUtf8().constData()
-              << std::endl;
+              << "  path=" << path.toUtf8().constData();
 
     // [EN] Never consume the event.  We are a passive observer - the event
     //      must reach its intended handler in the application.

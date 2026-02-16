@@ -21,6 +21,10 @@
 
 #include <QObject>
 #include <QEvent>
+#include <memory>
+
+class QRemoteObjectNode;
+class ROExampleReplica;
 
 namespace agent {
 class EventTracker : public QObject
@@ -32,6 +36,10 @@ public:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+
+private:
+    QRemoteObjectNode *m_roNode = nullptr;
+    std::shared_ptr<ROExampleReplica> m_roReplica = nullptr;
 };
 
 // [EN] Create and install the EventTracker on QCoreApplication.

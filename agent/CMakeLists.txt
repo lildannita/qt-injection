@@ -8,11 +8,17 @@ add_library(agent SHARED
     object_path.cpp
 )
 
+set(RO_REP_FILE "${CMAKE_SOURCE_DIR}/examples/remote_object_host/RemoteObjectExample.rep")
+qt5_generate_repc(RO_REPLICA_SRCS ${RO_REP_FILE} REPLICA)
+target_sources(agent PRIVATE ${RO_REPLICA_SRCS})
+target_include_directories(agent PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
 target_link_libraries(agent PRIVATE
     Qt5::Core
     Qt5::CorePrivate
     Qt5::Widgets
     Qt5::Quick
+    Qt5::RemoteObjects
 )
 
 # On Windows the DLL goes to bin/ so the injector can find it easily;

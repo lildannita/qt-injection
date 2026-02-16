@@ -1,0 +1,14 @@
+// Host side:  pushes 'message' property updates via QTimer.
+// Agent side: receives updates, calls pong() slot on the host.
+
+class ROExample
+{
+    // Property — host sets it, replica gets notified via signal.
+    PROP(QString message READWRITE)
+
+    // Slot on Source that Replica can invoke remotely.
+    SLOT(void pong(QString reply))
+
+    // Signal emitted by Source, delivered to Replica.
+    SIGNAL(ping(int sequenceNumber))
+}
