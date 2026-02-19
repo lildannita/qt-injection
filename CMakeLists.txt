@@ -22,7 +22,7 @@ foreach(CFG IN ITEMS DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CFG_UP} "${CMAKE_BINARY_DIR}/lib")
 endforeach()
 
-find_package(Qt5 5.15 REQUIRED COMPONENTS Core Widgets Quick RemoteObjects)
+find_package(Qt5 5.15 REQUIRED COMPONENTS Core Widgets Quick RemoteObjects Network)
 
 add_subdirectory(examples)
 add_subdirectory(agent)

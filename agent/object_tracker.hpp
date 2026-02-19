@@ -27,6 +27,9 @@ class QRemoteObjectNode;
 class ROExampleReplica;
 
 namespace agent {
+
+class AdbSocketProxy;
+
 class EventTracker : public QObject
 {
     Q_OBJECT
@@ -38,8 +41,11 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
+    void connectRemoteObjects();
+
     QRemoteObjectNode *m_roNode = nullptr;
     std::shared_ptr<ROExampleReplica> m_roReplica = nullptr;
+    AdbSocketProxy *m_proxy = nullptr;  // Android only
 };
 
 // [EN] Create and install the EventTracker on QCoreApplication.

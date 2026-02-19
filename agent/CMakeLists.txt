@@ -6,6 +6,8 @@ add_library(agent SHARED
     object_tracker.cpp
     object_path.hpp
     object_path.cpp
+    adb_socket_proxy.hpp
+    adb_socket_proxy.cpp
 )
 
 set(RO_REP_FILE "${CMAKE_SOURCE_DIR}/examples/remote_object_host/RemoteObjectExample.rep")
@@ -19,6 +21,7 @@ target_link_libraries(agent PRIVATE
     Qt5::Widgets
     Qt5::Quick
     Qt5::RemoteObjects
+    Qt5::Network
 )
 
 # On Windows the DLL goes to bin/ so the injector can find it easily;

@@ -6,5 +6,5 @@ add_executable(ro_host
     RemoteObjectExample.hpp
     ${SOURCE_SRCS}
 )
-target_link_libraries(ro_host PRIVATE Qt5::Core Qt5::RemoteObjects)
+target_link_libraries(ro_host PRIVATE Qt5::Core Qt5::RemoteObjects Qt5::Network)
 target_include_directories(ro_host PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

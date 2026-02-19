@@ -10,6 +10,10 @@
 #include "object_path.hpp"
 #include "rep_RemoteObjectExample_replica.h"
 
+#ifdef Q_OS_ANDROID
+#include "adb_socket_proxy.hpp"
+#endif
+
 namespace agent {
 
 // [EN] Returns a human-readable name for user interaction event types.
@@ -83,14 +87,83 @@ static bool isGuiObject(const QObject *obj) noexcept
 EventTracker::EventTracker(QObject *parent)
     : QObject(parent)
 {
+#ifdef Q_OS_ANDROID
+    // [EN] On Android we cannot use TCP (requires INTERNET permission)
+    //      and "local:" sockets won't reach the PC.
+    //
+    //      Solution: AdbSocketProxy creates:
+    //        - An abstract Unix domain socket "ro_agent" (AF_UNIX, no permission needed)
+    //        - A QLocalServer "ro_demo" bridged to it
+    //
+    //      ADB on the PC side:
+    //        adb forward tcp:65511 localabstract:ro_agent
+    //
+    //      ro_host on PC listens on tcp://0.0.0.0:65511.
+    //      The proxy transparently bridges ADB↔QLocalServer.
+    //      Our QRemoteObjectNode connects to "local:ro_demo" — pure IPC,
+    //      no INTERNET permission required.
+    //
+    // [RU] На Android нельзя использовать TCP (требуется INTERNET permission),
+    //      а "local:" сокеты не достигнут ПК.
+    //
+    //      Решение: AdbSocketProxy создаёт:
+    //        - Абстрактный Unix domain socket "ro_agent" (AF_UNIX, permission не нужен)
+    //        - QLocalServer "ro_demo", связанный мостом с ним
+    //
+    //      ADB на стороне ПК:
+    //        adb forward tcp:65511 localabstract:ro_agent
+    //
+    //      ro_host на ПК слушает на tcp://0.0.0.0:65511.
+    //      Прокси прозрачно связывает ADB↔QLocalServer.
+    //      Наш QRemoteObjectNode подключается к "local:ro_demo" — чистый IPC,
+    //      INTERNET permission не требуется.
+
+    m_proxy = new AdbSocketProxy(
+        QStringLiteral("ro_agent"),   // abstract socket name for ADB
+        QStringLiteral("ro_demo"),    // QLocalServer name for QtRO replica
+        this);
+
+    QObject::connect(m_proxy, &AdbSocketProxy::ready, this, [this]() {
+        qInfo() << "[agent] proxy ready, connecting RemoteObjects to local:ro_demo";
+        connectRemoteObjects();
+    });
+    QObject::connect(m_proxy, &AdbSocketProxy::errorOccurred, this, [](const QString &msg) {
+        qWarning() << "[agent] proxy error:" << msg;
+    });
+    m_proxy->start();
+
+#else
+    // [EN] On desktop: direct connection via local: or tcp:// as before.
+    //      Controlled by AGENT_RO_URL env var, default "local:demo".
+    // [RU] На десктопе: прямое подключение через local: или tcp:// как раньше.
+    //      Управляется переменной окружения AGENT_RO_URL, по умолчанию "local:demo".
+    connectRemoteObjects();
+#endif
+}
+
+void EventTracker::connectRemoteObjects()
+{
+    QString urlStr = qEnvironmentVariable("AGENT_RO_URL");
+    if (urlStr.isEmpty()) {
+#ifdef Q_OS_ANDROID
+        // [EN] On Android the proxy provides a local server at "ro_demo".
+        // [RU] На Android прокси предоставляет локальный сервер "ro_demo".
+        urlStr = QStringLiteral("local:ro_demo");
+#else
+        urlStr = QStringLiteral("local:demo");
+#endif
+    }
+
+    const QUrl roUrl(urlStr);
+    qInfo() << "[agent] connecting RemoteObjects to" << roUrl;
+
     m_roNode = new QRemoteObjectNode(this);
-    m_roNode->connectToNode(QUrl(QStringLiteral("local:demo")));
+    m_roNode->connectToNode(roUrl);
 
     m_roReplica.reset(m_roNode->acquire<ROExampleReplica>());
     if (m_roReplica) {
         QObject::connect(m_roReplica.get(), &QRemoteObjectReplica::initialized, this, [this]() {
             qInfo() << "[agent] ROExampleReplica initialized";
-            // Call a remote slot on the host as a handshake.
             m_roReplica->pong(QStringLiteral("agent connected"));
         });
 
@@ -100,6 +173,12 @@ EventTracker::EventTracker(QObject *parent)
         QObject::connect(m_roReplica.get(), &ROExampleReplica::ping, this, [](int seq) {
             qInfo() << "[agent] RO ping:" << seq;
         });
+
+        QObject::connect(m_roReplica.get(), &QRemoteObjectReplica::stateChanged, this,
+            [](QRemoteObjectReplica::State newState, QRemoteObjectReplica::State oldState) {
+                qInfo() << "[agent] RO replica state:"
+                        << oldState << "->" << newState;
+            });
     }
 }
 
